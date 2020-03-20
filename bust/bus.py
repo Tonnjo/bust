@@ -8,7 +8,7 @@ class Bus(object):
     """! @brief Managing bus information
 
     """
-    supported_bus = ['axi', 'ipbus']
+    supported_bus = ['axi', 'ipbus','wishbone']
     default_comp_library = "work"
     default_comp_library_ipbus = 'ipbus'
 
@@ -35,6 +35,9 @@ class Bus(object):
         elif self.bus_type == 'ipbus':
             self.short_name = 'ipb'
             self.bus_reset = 'sync'
+        elif self.bus_type == 'wishbone':
+            self.short_name = 'wishbone'
+            self.bus_reset = 'async'
 
 
     def return_JSON(self):
