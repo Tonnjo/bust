@@ -96,6 +96,66 @@ class BusVHDLGen():
 
             s += 'end ' + self.bus_type + '_pkg;'
 
+        if self.bus_type == 'wishbone':
+            s = 'library ieee;\n'
+            s += 'use ieee.std_logic_1164.all;\n'
+            s += '\n'
+
+            s += 'package ' + self.bus_type + '_pkg is\n'
+            s += '\n\n'
+
+            data_width_constant = 'C_' + self.bus_type.upper() + '_DATA_WIDTH'
+            addr_width_constant = 'C_' + self.bus_type.upper() + '_ADDR_WIDTH'
+            data_sub_type = 't_' + self.bus_type + '_data'
+            addr_sub_type = 't_' + self.bus_type + '_addr'
+
+            par = ''
+            par += 'constant ' + data_width_constant
+            par += ' : natural := ' + str(self.data_width) + ';\n'
+            par += 'constant ' + addr_width_constant
+            par += ' : natural := ' + str(self.addr_width) + ';\n'
+            par += '\n'
+            par += 'subtype ' + data_sub_type + ' is std_logic_vector('
+            par += data_width_constant + '-1 downto 0);\n'
+            par += 'subtype ' + addr_sub_type + ' is std_logic_vector('
+            par += addr_width_constant + '-1 downto 0);\n'
+            par += '\n'
+            s += indent_string(par)
+
+            s += indent_string('type t_' + self.bus_type)
+            s += '_mosi is record\n'
+            par = ''                         
+            par += 'clk_i   : std_logic;\n'
+            par += 'rst_i   : std_logic;\n'
+            par += 'dat_i   : ' + data_sub_type + ';\n'
+            par += 'dat_o   : ' + data_sub_type + ';\n'
+            par += 'adr_i   : ' + addr_sub_type + ';\n'
+            par += 'ack_o   : std_logic;\n'           
+            par += 'cyc_i   : std_logic;\n'
+            par += 'stb_i   : std_logic;\n'
+            par += 'we_i    : std_logic;\n'
+            s += indent_string(par, 2)
+            s += indent_string('end record;\n')
+            s += '\n'
+
+            s += indent_string('type t_' + self.bus_type)
+            s += '_miso is record\n'
+            par = ''
+            par += 'clk_i   : std_logic;\n'
+            par += 'rst_i   : std_logic;\n'
+            par += 'dat_i   : ' + data_sub_type + ';\n'
+            par += 'dat_o   : ' + data_sub_type + ';\n'
+            par += 'adr_i   : ' + addr_sub_type + ';\n'
+            par += 'ack_i   : std_logic;\n'           
+            par += 'cyc_o   : std_logic;\n'
+            par += 'stb_o   : std_logic;\n'
+            par += 'we_o    : std_logic;\n'
+            s += indent_string(par, 2)
+            s += indent_string('end record;\n')
+            s += '\n'
+
+            s += 'end ' + self.bus_type + '_pkg;'
+
         return s
 
     def return_bus_pif_VHDL(self, mod):
@@ -169,6 +229,16 @@ class BusVHDLGen():
             par += '{}_in         : in  {};\n'.format(self.short_name, self.in_type)
             par += '{}_out        : out {}\n'.format(self.short_name, self.out_type)
 
+        elif self.bus_type =='wishbone':
+            par +='dat_i        : out t_' + mod.name + '_data;\n'
+            par +='dat_o        : in t_' + mod.name + '_data;\n'
+            par +='ack          : out std_logic;\n'
+            par +='adr          : in t_' + mod.name + '_addr;\n'
+            par +='cyc          : in std_logic;\n'
+            par +='stb          : in std_logic;\n'
+            par +='we           : in std_logic;\n'
+            
+
         par += ');\n'
         s += indent_string(par, 2)
         s += 'end ' + mod.name + '_' + self.short_name + '_pif;\n\n'
@@ -206,6 +276,8 @@ class BusVHDLGen():
             s += self.return_axi_pif_VHDL(mod, clk_name, str.strip(reset_name))
         elif self.bus_type == 'ipbus':
             s += self.return_ipbus_pif_VHDL(mod, clk_name, str.strip(reset_name))
+        elif self.bus_type == 'wishbone':
+            s += self.return_wishbone_pif_VHDL(mod, clk_name, str.strip(reset_name))
 
 
         return s
@@ -537,6 +609,298 @@ class BusVHDLGen():
 
         return s
 
+
+        def return_wishbone_pif_VHDL(self, mod, clk_name, reset_name):
+        s = ''
+        par = '-- internal bus signals for readback\n'
+        par += 'signal adr_i      : t_' + mod.name + '_addr;\n'
+        par += 'signal ack_i      : std_logic;\n'
+        par += 'signal cyc_i      : std_logic;\n'
+        par += 'signal stb_i      : std_logic;\n'
+        par += 'signal we_i       : std_logic;\n'
+        par += 'signal dat_out    : t_' + mod.name + '_data;\n'
+        par += 'signal dat_in     : t_' + mod.name + '_data;\n'
+        par += 'signal clk_int    : std_logic;\n\n'
+        par += 'signal wr_ack     : std_logic;\n'
+        par += 'signal rd_ack     : std_logic;\n\n'
+        par += 'signal wr_en      : std_logic;\n\n'
+        par += 'signal rd_en      : std_logic;\n\n'
+
+        par += 'signal slv_reg_rden : std_logic;\n'
+        par += 'signal slv_reg_wren : std_logic;\n'
+        par += 'signal reg_data_out : t_' + mod.name + '_data;\n'       
+        s += indent_string(par)
+
+        s += 'begin\n\n'
+
+        if mod.count_rw_regs() > 0:
+            s += indent_string('wishbone_rw_regs <= wishbone_rw_regs_i') + ';\n'
+        if mod.count_pulse_regs() > 0:
+            s += indent_string('wishbone_pulse_regs <= wishbone_pulse_regs_i') + ';\n'
+        if mod.count_rw_regs() + mod.count_pulse_regs() > 0:
+            s += '\n'
+
+       
+
+        s += indent_string(par)
+
+        ####################################################################
+        # p_wr_en
+        ####################################################################
+        reset_string = "wr_en <='0';"
+
+        logic_string = "if (stb = '1' and cyc = '1' and we = '1' and wr_ack ='0' and wr_en ='0') then\n"
+        logic_string += indent_string("wr_en <= '1';\n")
+        logic_string += "else\n"
+        logic_string += indent_string("wr_en <='0';\n")
+        logic_string += "end if;"
+
+        if self.bus_reset == "async":
+            s += indent_string(async_process(clk_name, reset_name, "p_wr_en", reset_string,
+                                             logic_string, self.reset_active_low))
+
+        elif self.bus_reset == "sync":
+            s += indent_string(sync_process(clk_name, reset_name, "p_wr_en", reset_string,
+                                            logic_string, self.reset_active_low))
+        s += "\n"
+
+        ####################################################################
+        # p_rd_en
+        ####################################################################
+        reset_string = "rd_en <= '0';"
+
+        logic_string = "if (stb = '1' and cyc = '1' and we = '1' and wr_ack ='0' and rd_en ='0') then\n"
+        logic_string += indent_string("rd_en <= '1';;\n")
+        logic_string += "else\n"
+        logic_string += indent_string("rd_en <= '0';\n")
+        logic_string += "end if;"
+
+        if self.bus_reset == "async":
+            s += indent_string(async_process(clk_name, reset_name, "p_rd_en", reset_string, logic_string, self.reset_active_low))
+
+        elif self.bus_reset == "sync":
+            s += indent_string(sync_process(clk_name, reset_name, "p_rd_en", reset_string, logic_string, self.reset_active_low))
+        s += "\n"
+
+        ####################################################################
+        # p_rd_ack
+        ####################################################################
+        reset_string = "rd_ack<='0';"
+
+        logic_string = "if(rd_en = '1' and rd_ack ='0' and rd_ack ='0')then\n"
+        logic_string += indent_string("rd_ack<='1';\n")
+        logic_string += 'else\n'
+        logic_string += indent_string("rd_ack<='0';\n")
+        logic_string += "end if;"
+
+        if self.bus_reset == "async":
+            s += indent_string(async_process(clk_name, reset_name, "p_rd_ack", reset_string, logic_string, self.reset_active_low))
+
+        elif self.bus_reset == "sync":
+            s += indent_string(sync_process(clk_name, reset_name, "p_rd_ack", reset_string, logic_string, self.reset_active_low))
+        s += "\n"
+
+        s += indent_string('slv_reg_wren <= wready_i and wvalid and awready_i and awvalid;\n')
+        s += '\n'
+
+        ####################################################################
+        # p_wr_ack
+        ####################################################################
+        reset_string = "wr_ack<='0';"
+
+        logic_string = "if(wr_en = '1' and wr_ack ='0' and wr_ack ='0')then\n"
+        logic_string += indent_string("wr_ack<='1';\n")
+        logic_string += 'else\n'
+        logic_string += indent_string("wr_ack<='0';\n")
+        logic_string += "end if;"
+
+        if self.bus_reset == "async":
+            s += indent_string(async_process(clk_name, reset_name, "p_wr_ack", reset_string, logic_string, self.reset_active_low))
+
+        elif self.bus_reset == "sync":
+            s += indent_string(sync_process(clk_name, reset_name, "p_wr_ack", reset_string, logic_string, self.reset_active_low))
+        s += "\n"
+
+        s += indent_string('slv_reg_wren <= wready_i and wvalid and awready_i and awvalid;\n')
+        s += '\n'
+
+        if mod.count_rw_regs() + mod.count_pulse_regs() > 0:
+            ###################################################################
+            #  p_write
+            ###################################################################
+            reset_string = "\n"
+            if mod.count_rw_regs() > 0:
+                reset_string += 'wishbone_rw_regs_i <= c_' + mod.name + '_rw_regs;\n'
+            if mod.count_pulse_regs() > 0:
+                reset_string += 'wishbone_pulse_regs_cycle <= c_' + mod.name + '_pulse_regs;\n'
+
+            logic_string = ""
+            # create a generator for looping through all pulse regs
+            if mod.count_pulse_regs() > 0:
+                logic_string += "\n-- Return PULSE registers to reset value every clock cycle\n"
+                logic_string += 'wishbone_pulse_regs_cycle <= c_' + mod.name + '_pulse_regs;\n\n'
+
+            logic_string += "\nif (wr_en = '1') then\n\n"
+
+            # create a generator for looping through all rw and pulse regs
+            gen = (reg for reg in mod.registers if reg.mode == "rw" or reg.mode == "pulse")
+            for reg in gen:
+                if reg.mode == 'rw':
+                    sig_name = 'wishbone_rw_regs_i.'
+                elif reg.mode == 'pulse':
+                    sig_name = 'wishbone_pulse_regs_cycle.'
+
+                par = "if unsigned(adr) = resize(unsigned(C_BASEADDR) + unsigned(C_ADDR_"
+                par += reg.name.upper() + "), " + str(self.addr_width) + ") then\n\n"
+                logic_string += indent_string(par, 2)
+                par = ''
+                if reg.sig_type == 'fields':
+
+                    for field in reg.fields:
+                        par += sig_name + reg.name + '.' + field.name
+                        par += ' <= dat_o('
+                        par += field.get_pos_vhdl()
+                        par += ');\n'
+
+                elif reg.sig_type == 'default':
+                    par += sig_name + reg.name + ' <= dat_o;\n'
+                elif reg.sig_type == 'slv':
+                    par += sig_name + reg.name + ' <= dat_o('
+                    par += str(reg.length - 1) + ' downto 0);\n'
+                elif reg.sig_type == 'sl':
+                    par += sig_name + reg.name + ' <= dat_o(0);\n'
+
+                logic_string += indent_string(par, 3)
+                logic_string += indent_string("\nend if;\n", 2)
+                logic_string += '\n'
+
+            logic_string += 'end if;\n'
+
+            if self.bus_reset == "async":
+                s += indent_string(async_process(clk_name, reset_name, "p_write",
+                                                 reset_string, logic_string, self.reset_active_low))
+
+            elif self.bus_reset == "sync":
+                s += indent_string(sync_process(clk_name, reset_name, "p_write",
+                                                reset_string, logic_string, self.reset_active_low))
+            s += "\n"
+
+        # Pulse reg process
+        # create a generator for looping through all rw and pulse regs
+        gen = (reg for reg in mod.registers if reg.mode == "pulse")
+        for reg in gen:
+            s += indent_string(self.pulse_reg_process(mod, reg))
+            s += '\n'
+
+
+        
+
+        ####################################################################
+        # p_read
+        ####################################################################
+        logic_string = "reg_data_out <= (others => '0');\n\n"
+
+        gen = [reg for reg in mod.registers
+               if reg.mode == "ro" or reg.mode == "rw"]
+        for reg in gen:
+            par = "if unsigned(adr) = resize(unsigned(C_BASEADDR) + unsigned(C_ADDR_"
+            par += reg.name.upper() + "), " + str(self.addr_width) + ") then\n\n"
+            logic_string += par
+            par = ''
+
+            if reg.sig_type == 'fields':
+
+                for field in reg.fields:
+                    par += 'reg_data_out('
+                    par += field.get_pos_vhdl()
+
+                    if reg.mode == 'rw':
+                        par += ') <= wishbone_rw_regs_i.'
+                    elif reg.mode == 'ro':
+                        par += ') <= wishbone_ro_regs.'
+                    else:
+                        raise Exception("Unknown error occurred")
+                    par += reg.name + '.' + field.name + ';\n'
+
+            elif reg.sig_type == 'default':
+                par += 'reg_data_out <= '
+                if reg.mode == 'rw':
+                    par += 'wishbone_rw_regs_i.'
+                elif reg.mode == 'ro':
+                    par += 'wishbone_ro_regs.'
+                else:
+                    raise Exception("Unknown error occurred")
+                par += reg.name + ';\n'
+
+            elif reg.sig_type == 'slv':
+                par += 'reg_data_out('
+                par += str(reg.length - 1) + ' downto 0) <= '
+                if reg.mode == 'rw':
+                    par += 'wishbone_rw_regs_i.'
+                elif reg.mode == 'ro':
+                    par += 'wishbone_ro_regs.'
+                else:
+                    raise Exception("Unknown error occurred")
+                par += reg.name + ';\n'
+
+            elif reg.sig_type == 'sl':
+                par += 'reg_data_out(0) <= '
+                if reg.mode == 'rw':
+                    par += 'wishbone_rw_regs_i.'
+                elif reg.mode == 'ro':
+                    par += 'wishbone_ro_regs.'
+                else:
+                    raise Exception("Unknown error occurred")
+                par += reg.name + ';\n'
+
+            logic_string += indent_string(par)
+            logic_string += "\nend if;\n"
+            logic_string += '\n'
+
+
+        s += indent_string(comb_process("p_read", logic_string))
+        s += "\n"
+
+        ####################################################################
+        # p_output
+        ####################################################################
+        reset_string = "dat_in <= (others => '0');"
+
+        logic_string = "if (rd_en = '1') then\n"
+        logic_string += indent_string(" dat_i <= reg_data_out;\n")
+        logic_string += "end if;"
+
+        if self.bus_reset == "async":
+            s += indent_string(async_process(clk_name, reset_name, "p_output", reset_string,
+                                             logic_string, self.reset_active_low))
+
+        elif self.bus_reset == "sync":
+            s += indent_string(sync_process(clk_name, reset_name, "p_output", reset_string,
+                                            logic_string, self.reset_active_low))
+        s += "\n"
+
+        ####################################################################
+        # p_ack
+        ####################################################################
+        reset_string = "ack<= '0';"
+
+        logic_string = "else;\n"
+        logic_string += indent_string("ack <=(rd_ack or wr_ack);\n")
+        logic_string += "end if;"
+
+        if self.bus_reset == "async":
+            s += indent_string(async_process(clk_name, reset_name, "p_ack", reset_string,
+                                             logic_string, self.reset_active_low))
+
+        elif self.bus_reset == "sync":
+            s += indent_string(sync_process(clk_name, reset_name, "p_ack", reset_string,
+                                            logic_string, self.reset_active_low))
+        s += "\n"
+
+        s += 'end behavior;'
+
+        return s
+
     def return_ipbus_pif_VHDL(self, mod, clk_name, reset_name):
         s = ''
         par = ('signal ipb_out_i      : ipb_rbus;\n'
@@ -853,6 +1217,20 @@ class BusVHDLGen():
             s = 'ipb_in              => ipb_in,\n'
             s += 'ipb_out             => ipb_out{}\n'.format(inter)
 
+         elif self.bus_type == 'wishbone':
+            s = 'adr             => ' + self.short_name + '_in.adr(C_'
+            s += name.upper() + '_ADDR_WIDTH-1 downto 0),\n'
+            s += 'dat_i               => ' + self.short_name + '_in.dat_in(C_'
+            s += name.upper() + '_DATA_WIDTH-1 downto 0),\n'
+            s += 'ack              => ' + self.short_name + '_out.ack_o,\n'
+            s += 'cyc              => ' + self.short_name + '_in{0}.cyc,\n'.format(inter)
+            s += 'stb               => ' + self.short_name + '_in{0}.stb,\n'.format(inter)
+            s += 'we              => ' + self.short_name + '_in{0}.we,\n'.format(inter)
+            s += 'dat_o               => ' + self.short_name + '_out{0}.dat_out(C_'.format(inter)
+            s += name.upper() + '_DATA_WIDTH-1 downto 0),\n'
+   
+            
+
         return s
 
     def pulse_reg_process(self, mod, reg):
@@ -903,6 +1281,9 @@ class BusVHDLGen():
         elif self.bus_type == 'ipbus':
             s = ('library vip_ipbus;\n'
                  'use vip_ipbus.ipbus_bfm_pkg.all;\n')
+        elif self.bus_type == 'ipbus':
+            s = ('library bitvis_vip_wishbone;\n'
+                 'use bitvis_vip_wishbone.wishbone_bfm_pkg.all;\n')
         return s
 
     def get_uvvm_signals(self):
@@ -911,6 +1292,9 @@ class BusVHDLGen():
             s += '-- Bitvis UVVM AXILITE BFM\n'
         elif self.bus_type == 'ipbus':
             s += '-- vip_ipbus BFM\n'
+        elif self.bus_type == 'wishbone':
+            s += '-- vBitvis UVVM AXILITE BFM\n'
+        
 
         s += ('constant data_width : natural := {};\n'
               'constant addr_width : natural := {};\n'
@@ -932,6 +1316,11 @@ class BusVHDLGen():
         elif self.bus_type == 'ipbus':
             s += ('signal ipbus_if : t_ipbus_if := init_ipbus_if_signals;\n'
                   'signal ipbus_bfm_config : t_ipbus_bfm_config := C_IPBUS_BFM_CONFIG_DEFAULT;\n')
+        elif self.bus_type == 'wishbone':
+            s += ('signal wishbone_if : t_wishbone_if(dat_o(data_width-1 downto 0),\n'
+                  '                                    dat_i(data_width-1 downto 0),'
+                  '                                   adr_o(addr_width-1 downto 0)'
+                  '                                   ) := init_wishbone_if_signals(addr_width,data_width);\n')  
 
         return s
 
@@ -972,7 +1361,16 @@ class BusVHDLGen():
                  'ipbus_if.rdata  <= ipb_out.ipb_rdata;\n'
                  'ipbus_if.ack  <= ipb_out.ipb_ack;\n'
                  'ipbus_if.err  <= ipb_out.ipb_err;\n')
-
+        elif self.bus_type == 'wishbone':
+            s = ('wishbone_in.adr_i <= wishbone_if.adr_o;\n'
+                 'wishbone_in.cyc_i <= wishbone_if.cyc_o;\n'
+                 'wishbone_in.stb_i <= wishbone_if.stb_o;\n'
+                 'wishbone_in.we_i  <= wishbone_if.we_o;\n'
+                 'wishbone_in.dat_o <= wishbone_if.dat_o;\n'
+                 'wishbone_in.clk_i <= wishbone_clk;\n'
+                 'wishbone_in.rst_i <= wishbone_rst_i;\n'
+                 'wishbone_if.ack_i <= wishbone_in.ack_o;\n'
+                 ' wishbone_if.dat_i  <= wishbone_in.dat_i;\n'
         return s
 
 
@@ -981,6 +1379,8 @@ class BusVHDLGen():
         if self.bus_type == 'axi':
             ext_name = 'axilite'
         elif self.bus_type == 'ipbus':
+            ext_name = self.bus_type
+        elif self.bus_type == 'wishbone':
             ext_name = self.bus_type
 
         s += ('procedure write(\n'
